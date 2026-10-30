@@ -1,0 +1,30 @@
+### Load Libraries FU16 TAF
+
+library(RODBC)
+library(tidyverse)
+library(lattice)
+library(lubridate)
+library(mapplots)
+library(sp)
+library(sf)
+library(reshape2)
+library(readxl)
+library(knitr)
+library(DataCombine)
+library(icesTAF)
+library(magrittr)
+library(viridis)
+library(sessioninfo)
+library(stringr)
+library(matrixStats)
+
+
+## extra Model 02
+library(fields)
+library(gstlearn)
+library(maps)
+library(mapproj)
+.Last.projection=list(active=F,projection="mean",parameters=NULL,orientation=NULL)
+library(RColorBrewer)
+library(sf)
+library(tidyverse)

@@ -1,0 +1,330 @@
+---
+title: "data_01_exploration"
+author: "WGNEPH Author"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libs, message=FALSE, echo=TRUE, warning=FALSE}
+
+gc()
+rm(list=ls())
+
+library(RODBC)
+library(tidyverse)
+library(lattice)
+library(lubridate)
+library(mapplots)
+library(sp)
+library(sf)
+library(reshape2)
+library(readxl)
+library(knitr)
+library(DataCombine)
+library(icesTAF)
+library(magrittr)
+library(viridis)
+library(sessioninfo)
+library(stringr)
+library(matrixStats)
+```
+
+
+
+# Setup options
+
+```{r setupoptions}
+curr.year <- 2026
+dat.year <- curr.year -1
+fu.n <- "FU16"
+
+save.plots <- F # set it up as T or F whether you want to save the plots when running all the chunks or kniting the document
+save.tables <- F # set it up as T or F whether you want to save the tables "propmature"" and the "L50" into .txt files when running all the chunks or knitting the document
+
+# ewen plot
+source("boot/initial/functions/required.funcs.r")
+source("boot/initial/functions/ld1.plot.r")
+```
+
+# Introduction
+
+The goals of this R Markdown document are to:
+
+* Preprocess and explore FU16 Intercatch data
+* Write TAF data tables
+
+Files before (inside "boot/data/intercatch"):
+
+* int.land.csv
+* NepLand_WGNEPH2026
+* MSY_nep_stocks.csv
+* StockOverview.txt
+* taf.sexratio.catches
+* taf.wtssum_with_meanweight
+
+
+
+Files after (inside "data/data_01_exploration"):
+
+* FU16_int_landings.png
+
+* FU16_national_landings.png
+* FU16_ProportionMale_Catch.png 
+* FU16_MeanWeight_Catch.png
+
+
+# Data Work Up
+<a href="#top">Back to top</a>
+
+This Rmarkdown document outputs landings from Intercatch and mean weights, sex ratio data.
+Mean weights from national extraction (FU16 Grade data.rmd)
+Sex ratio data from national extraction (FU16_CommercialSampling_Investigations.rmd)
+International landings revisions file this year as french data revisions included
+
+## Load and plot Landings data
+<a href="#top">Back to top</a>
+
+### International Landings
+
+```{r dat1, echo=TRUE, fig.height=8, fig.width=14, warning=FALSE, fig.cap="Annual Derived Discard Ogives."}
+
+int.land <- read.csv("boot/data/intercatch/int.land.revisions.csv") # revisions file this year as French data revisions included 
+
+# Calculate % of landings per country 
+int_2015_2025_pct <- int.land %>%
+  filter(between(Year, 2015, 2025)) %>%
+  mutate(across(France:Unallocated,
+                ~ round((.x / Total) * 100, 1)))
+
+int_2015_2025_pct
+
+if (save.plots == T) {
+  write.csv(int_2015_2025_pct, "data/data_01_exploration/fu16.international.landings.percentage.csv", row.names = F)
+}
+
+prop <- int.land
+
+prop[is.na(prop)] <- 0 #replace missing values with 0
+
+# Calculate row-wise proportions
+prop_row <- prop
+prop_row[,-c(1, ncol(prop))] <- prop[,-c(1, ncol(prop))] / prop$Total
+
+# Check the result
+head(prop_row)
+
+int.land <- gather(int.land[,-9], Country, value=Tonnes, 2:8)
+int.land$Country <- as.factor(int.land$Country)
+levels(int.land$Country)
+int.land$Country <- factor(int.land$Country,
+                     levels=c("France", "Ireland", "Unallocated",
+                              "Spain", "UK_S", "UK_E_W", "UK_NI"))
+levels(int.land$Country)
+
+ggplot(int.land, aes(Year, Tonnes, fill=Country)) +
+  geom_bar(stat="identity", color = "black") +
+  ylab("Landings (tonnes)") +
+  scale_x_continuous(breaks=seq(max(int.land$Year), min(int.land$Year), -5)) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  scale_fill_manual(values= c("dodgerblue3", "seagreen4", "seagreen3", "goldenrod3", "firebrick3", "firebrick2", "firebrick4"))
+
+
+int.land <- int.land %>% mutate_all(funs(replace(., is.na(.), 0)))
+
+if (save.plots == T) {
+  write.csv(prop_row, "data/data_01_exploration/fu16.international.landings.csv", row.names = F)
+}
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_int_landings.png")
+}
+
+```
+
+### Quarterly Landings by country to be done
+Stock overview files from intercatch
+<a href="#top">Back to top</a>
+
+```{r dat22, echo=TRUE, fig.height=7, fig.width=7, warning=FALSE}
+
+int.land.q.25 <- read_excel("boot/data/intercatch/StockOverviewFU16_2026_Q.xlsx", sheet = 2)
+
+
+# Stock Overview values are in kg - convert to tonnes
+int.land.q.25 <- int.land.q.25 %>%
+  dplyr::mutate(
+    dplyr::across(
+      c(France, Ireland, Spain, UK_E_W, UK_NI, UK_S, Unallocated, Total),
+      ~ as.numeric(.) / 1000
+    )
+  )
+
+
+int.land.long <- int.land.q.25 %>%
+  tidyr::pivot_longer(
+    cols = c(France, Ireland, Spain, UK_E_W, UK_NI, UK_S, Unallocated),
+    names_to = "Country",
+    values_to = "Tonnes"
+  ) %>%
+  dplyr::mutate(
+    Tonnes = tidyr::replace_na(Tonnes, 0)
+  )
+
+ggplot(int.land.long, aes(x = factor(Quarter), y = Tonnes, fill = Country)) +
+  geom_bar(stat = "identity", color = "black") +
+  ylab("Landings (tonnes)") +
+  xlab("Quarter") +
+  ggtitle("International landings by quarter in 2025") +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  scale_fill_manual(values = c(
+    "dodgerblue3", "seagreen4", "seagreen3",
+    "goldenrod3", "firebrick3", "firebrick2", "firebrick4"
+  ))
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_int_landings_q_2025.png")
+}
+
+
+```
+
+### National Landings
+<a href="#top">Back to top</a>
+
+```{r dat2, echo=TRUE, fig.height=7, fig.width=10, warning=FALSE}
+
+nat.land <- read.csv("boot/data/intercatch/NepLand_WGNEPH2026.csv")
+
+
+str(nat.land)
+nat.land$LiveWt <- as.numeric(as.character(nat.land$LiveWt))
+nat.land$LiveWtRaisedToDecs <- as.numeric(as.character(nat.land$LiveWtRaisedToDecs))
+aggregate(LiveWt/1000 ~ Year + FU, nat.land, sum)
+
+
+nat <- subset(nat.land, FU == "16")
+
+ggplot(nat, aes(as.factor(Year), LiveWt/1000, fill=factor(Quarter))) + geom_bar(stat="identity", position= "stack") + 
+  theme_bw() + ylab("Landings (tonnes)") + 
+  labs(fill = "Quarter") +
+  xlab("Year") +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank())
+
+if (save.plots == T) {
+  write.csv(prop_row, "data/data_01_exploration/fu16.national.landings.csv", row.names = F)
+}
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_national_landings.png")
+}
+```
+
+
+## Plot the sex ratio to see if any trends as the fishery is male biased.
+<a href="#top">Back to top</a>
+
+```{r dat3, echo=TRUE, fig.height=7, fig.width=10,warning=FALSE, fig.cap="% of Male in Catches from national sampling programme."}
+
+sr <- read.csv("boot/data/intercatch/taf.sexratio.catches.csv")
+
+plot <- ggplot(sr,aes(year,sr)) + geom_line()  +
+            ylab("Percent males in the Catches ") + xlab("Year") + theme_bw() +
+            scale_x_continuous(breaks=c(2003:dat.year), labels=c(2003:dat.year),limits=c(2003,dat.year)) +
+            theme_bw() + ylab("% male by number") +
+            coord_cartesian(ylim= c(0, 1), xlim=c(2003,dat.year) +
+          theme(panel.grid=element_blank(), legend.position = "bottom") +
+          scale_x_continuous(name="\nYear",
+                             breaks = seq(min(as.numeric(as.character(sr$year))),
+                                         max(as.numeric(as.character(sr$year))), by = 4)))
+
+knitr::kable(sr, digits=3) 
+
+ if (save.tables == T) {
+   write.csv(sr, "data/data_01_exploration/fu16.prop.male.catch.csv",sep=",", row.names = F)
+ }
+
+plot + theme(axis.text=element_text(size=10),axis.title=element_text(size=10))  +
+      theme(panel.grid=element_blank(), legend.position = "bottom")
+
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_ProportionMale_Catch.png")
+}
+```
+
+
+## Mean weight (g) in the catches estimations from national sampling programme.
+<a href="#top">Back to top</a>
+
+```{r dat4, echo=TRUE, fig.height=5, fig.width=9,warning=FALSE, fig.cap="Mean weights (gr) from national sampling programme."}
+
+mw <- read.csv("boot/data/intercatch/taf.wtssum.csv")
+
+
+ggplot(mw, aes(year, Mean_Weight)) + geom_line() + geom_point() +
+  coord_cartesian(ylim=c(0,75))+
+  scale_y_continuous(breaks = c(seq(0, 75, by=15)))+#, max(lfd.sum$Mean_Weight))) +
+  ylab("Mean weight (g)")+
+  scale_x_continuous(breaks = c(seq(max(mw$year), min(mw$year), by=-5))) +
+  xlab("Year")+
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_MeanWeight_Catch.png")
+}
+
+# Additional mean weight information 
+
+mw$Period <- case_when(
+  mw$year <= 2009 ~ "1986–2009",
+  mw$year <= 2019 ~ "2010–2019",
+  mw$year >= 2020 ~ "2020–2025"
+)
+ggplot(mw, aes(x = year, y = Mean_Weight, color = Period)) +
+  geom_line(aes(group = Period), size = 1) +
+  geom_point() +
+  coord_cartesian(ylim = c(0, 75)) +
+  scale_y_continuous(breaks = seq(0, 75, by = 15)) +
+  scale_x_continuous(breaks = seq(max(mw$year), min(mw$year), by = -5)) +
+  ylab("Mean weight (g)") +
+  xlab("Year") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_manual(
+    name = "Period",   # legend title
+    values = c(
+      "1986–2009" = "black",
+      "2010–2019" = "blue",
+      "2020–2025" = "orange"
+    ),
+    labels = c(
+      "1986–2009" = "Mean",
+      "2010–2019" = "Mean in landings",
+      "2020–2025" = "Mean in landings proxy"
+    )
+  )
+
+if (save.plots == T) {
+  ggsave("data/data_01_exploration/FU16_MeanWeight_Catch_methodcomparison.png")
+}
+```
+
+
+<a href="#top">Back to top</a>
